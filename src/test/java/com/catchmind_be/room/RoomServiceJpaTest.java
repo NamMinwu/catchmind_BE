@@ -3,20 +3,26 @@ package com.catchmind_be.room;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.catchmind_be.common.utils.RoomCodeGenerator;
+import com.catchmind_be.game.GameService;
+import com.catchmind_be.game.GameSessionRepository;
+import com.catchmind_be.game.MemoryGameSessionRepository;
 import com.catchmind_be.player.PlayerRepository;
 import com.catchmind_be.player.entity.Player;
+import com.catchmind_be.player.response.PlayerResponse;
 import com.catchmind_be.room.entity.Room;
-import com.catchmind_be.room.response.JoinRoomResponse;
 import com.catchmind_be.room.response.LeaveRoomResponse;
+import com.catchmind_be.room.response.RoomSnapshotResponse;
 import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabase;
 import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
+import org.springframework.messaging.simp.SimpMessagingTemplate;
 
 @DataJpaTest
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.ANY)
@@ -85,52 +91,57 @@ class RoomServiceJpaTest {
     Room created = roomService.createRoom("host-nick");
     String roomCode = created.getCode();
 
-    JoinRoomResponse response = roomService.joinRoom(roomCode, "guest");
+    RoomSnapshotResponse response = roomService.joinRoom(roomCode, "guest");
 
     assertThat(response.roomCode()).isEqualTo(roomCode);
-    assertThat(response.playerId()).isNotBlank();
     assertThat(response.players()).hasSize(2);
     assertThat(response.players())
-        .extracting(resPlayer -> resPlayer.nickname())
+        .extracting(PlayerResponse::nickname)
         .containsExactlyInAnyOrder("host-nick", "guest");
 
-    Room reloaded = roomRepository.findByCode(roomCode).orElseThrow();
-    List<Player> playersInRoom = reloaded.getPlayers();
+    List<Player> playersInRoom = playerRepository.findPlayersByRoomCodeOrdered(roomCode);
     assertThat(playersInRoom).hasSize(2);
     Player host = playersInRoom.stream().filter(Player::isHost).findFirst().orElseThrow();
     Player guest = playersInRoom.stream().filter(player -> !player.isHost()).findFirst().orElseThrow();
 
     assertThat(host.getNickname()).isEqualTo("host-nick");
     assertThat(guest.getNickname()).isEqualTo("guest");
-    assertThat(response.playerId()).isEqualTo(String.valueOf(guest.getId()));
+
+    Long responseGuestId = response.players().stream()
+        .filter(player -> !player.isHost())
+        .map(PlayerResponse::playerId)
+        .findFirst()
+        .orElseThrow();
+    assertThat(responseGuestId).isEqualTo(guest.getId());
   }
 
 
 
   @Test
   void 일반_플레이어가_나가면_방은_유지되고_새_호스트는_선정되지_않는다() {
-    // given: 방 생성 + 게스트 조인
     Room room = roomService.createRoom("host");
     String roomCode = room.getCode();
     String hostId = room.getHostPlayerId();
 
-    JoinRoomResponse guestJoin = roomService.joinRoom(roomCode, "guest");
-    String guestId = guestJoin.playerId();
+    RoomSnapshotResponse guestJoin = roomService.joinRoom(roomCode, "guest");
+    String guestId = guestJoin.players().stream()
+        .filter(player -> !player.isHost())
+        .map(player -> String.valueOf(player.playerId()))
+        .findFirst()
+        .orElseThrow();
 
-    // when: 게스트가 퇴장
     LeaveRoomResponse res = roomService.leaveRoom(roomCode, guestId);
 
-    // then
     assertThat(res.roomCode()).isEqualTo(roomCode);
     assertThat(res.roomDeleted()).isFalse();
     assertThat(res.newHostPlayerId()).isNull();
     assertThat(res.remainingPlayers()).isEqualTo(1);
 
-    // DB 상태: 방은 존재, 호스트만 남음
     Room reloaded = roomRepository.findByCode(roomCode).orElseThrow();
     assertThat(reloaded.getHostPlayerId()).isEqualTo(hostId);
-    assertThat(reloaded.getPlayers()).hasSize(1);
-    Player only = reloaded.getPlayers().get(0);
+    List<Player> remaining = playerRepository.findPlayersByRoomCodeOrdered(roomCode);
+    assertThat(remaining).hasSize(1);
+    Player only = remaining.get(0);
     assertThat(only.getId()).isEqualTo(Long.valueOf(hostId));
     assertThat(only.isHost()).isTrue();
   }
@@ -142,8 +153,8 @@ class RoomServiceJpaTest {
     String roomCode = room.getCode();
     String oldHostId = room.getHostPlayerId();
 
-    JoinRoomResponse g1 = roomService.joinRoom(roomCode, "u1");
-    JoinRoomResponse g2 = roomService.joinRoom(roomCode, "u2");
+    RoomSnapshotResponse g1 = roomService.joinRoom(roomCode, "u1");
+    RoomSnapshotResponse g2 = roomService.joinRoom(roomCode, "u2");
 
     // when: 호스트 퇴장
     LeaveRoomResponse res = roomService.leaveRoom(roomCode, oldHostId);
@@ -167,6 +178,21 @@ class RoomServiceJpaTest {
     @Bean
     RoomCodeGenerator roomCodeGenerator() {
       return new RoomCodeGenerator();
+    }
+
+    @Bean
+    GameSessionRepository gameSessionRepository() {
+      return new MemoryGameSessionRepository();
+    }
+
+    @Bean
+    GameService gameService() {
+      return Mockito.mock(GameService.class);
+    }
+
+    @Bean
+    SimpMessagingTemplate simpMessagingTemplate() {
+      return Mockito.mock(SimpMessagingTemplate.class);
     }
   }
 }

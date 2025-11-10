@@ -115,7 +115,9 @@ public class RoomService {
 
 
     if(remaining == 0){
-      gameService.endGame(room.getId());
+      Long roomId = room.getId();
+      gameService.endGame(roomId);
+      roomRepository.delete(room);
       return new LeaveRoomResponse(
           roomCode,
           true,
