@@ -1,14 +1,16 @@
 package com.catchmind_be.room;
 
 import com.catchmind_be.common.exception.response.ApiResponse;
+import com.catchmind_be.game.GameService;
+import com.catchmind_be.game.response.GameEventMessage;
+import com.catchmind_be.game.response.GameState;
 import com.catchmind_be.room.entity.Room;
 import com.catchmind_be.room.request.CreateRoomRequest;
 import com.catchmind_be.room.request.JoinRoomRequest;
 import com.catchmind_be.room.response.CreateRoomResponse;
-import com.catchmind_be.room.response.JoinRoomResponse;
+import com.catchmind_be.room.response.RoomSnapshotResponse;
 import com.catchmind_be.room.response.LeaveRoomResponse;
 import lombok.AllArgsConstructor;
-import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -22,7 +24,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/rooms")
 public class RoomController {
   private final RoomService roomService;
-  private final SimpMessagingTemplate messagingTemplate;
+  private final GameService gameService;
 
   @PostMapping
   public ApiResponse<CreateRoomResponse> createRoom(@RequestBody CreateRoomRequest createRoomRequest) {
@@ -32,15 +34,31 @@ public class RoomController {
   }
 
   @GetMapping("/{roomCode}")
-  public Room getRoom(@PathVariable String roomCode) {
-    return roomService.getRoom(roomCode);
+  public ApiResponse<RoomSnapshotResponse> getRoom(@PathVariable String roomCode) {
+    return ApiResponse.success(roomService.getRoom(roomCode));
   }
 
   @PostMapping("/{roomCode}/players")
-  public ApiResponse<JoinRoomResponse> joinRoom(@PathVariable String roomCode, @RequestBody JoinRoomRequest joinRoomRequest) {
-    JoinRoomResponse joinRoomResponse = roomService.joinRoom(roomCode, joinRoomRequest.nickname());
-    broadcastState(joinRoomResponse);
-    return ApiResponse.success(joinRoomResponse);
+  public ApiResponse<RoomSnapshotResponse> joinRoom(@PathVariable String roomCode, @RequestBody JoinRoomRequest joinRoomRequest) {
+    RoomSnapshotResponse roomSnapshotResponse = roomService.joinRoom(roomCode, joinRoomRequest.nickname());
+    roomService.broadcastState(roomSnapshotResponse);
+    return ApiResponse.success(roomSnapshotResponse);
+  }
+
+  @PostMapping("/{roomCode}/start")
+  public ApiResponse<RoomSnapshotResponse> startGame(@PathVariable String roomCode){
+    GameState gameState = gameService.startGame(roomCode);
+    RoomSnapshotResponse roomSnapshotResponse = roomService.getRoom(roomCode);
+    roomService.broadcastState(roomSnapshotResponse);
+    roomService.broadcastGameEvent(roomCode, new GameEventMessage(
+        "ROUND_STARTED",
+        gameState.currentRound(),
+        gameState.totalRounds(),
+        gameState.currentDrawerId(),
+        gameState.word(),
+        false
+    ));
+    return ApiResponse.success(roomSnapshotResponse);
   }
 
   @DeleteMapping("/{roomCode}/players/{playerId}")
@@ -49,8 +67,4 @@ public class RoomController {
     return ApiResponse.success(leaveRoomResponse);
   }
 
-  private void broadcastState(JoinRoomResponse joinRoomResponse) {
-    messagingTemplate.convertAndSend("/topic/rooms/" + joinRoomResponse.roomCode() + "/state",
-        joinRoomResponse);
-  }
 }

@@ -3,15 +3,20 @@ package com.catchmind_be.room;
 import com.catchmind_be.common.exception.CustomException;
 import com.catchmind_be.common.exception.code.ErrorCode;
 import com.catchmind_be.common.utils.RoomCodeGenerator;
+import com.catchmind_be.game.GameService;
+import com.catchmind_be.game.GameSessionRepository;
+import com.catchmind_be.game.entity.GameSession;
+import com.catchmind_be.game.response.GameEventMessage;
 import com.catchmind_be.player.PlayerRepository;
 import com.catchmind_be.player.entity.Player;
 import com.catchmind_be.player.response.PlayerResponse;
 import com.catchmind_be.room.entity.Room;
-import com.catchmind_be.room.response.JoinRoomResponse;
+import com.catchmind_be.room.response.RoomSnapshotResponse;
 import com.catchmind_be.room.response.LeaveRoomResponse;
 import java.security.SecureRandom;
 import java.util.List;
 import lombok.AllArgsConstructor;
+import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -25,9 +30,12 @@ public class RoomService {
   private static final int ROOM_CODE_LENGTH = 6;
   private static final int RANDOM_SUFFIX_RANGE = 9000;
 
+  private final GameSessionRepository gameSessionRepository;
   private final RoomRepository roomRepository;
   private final PlayerRepository playerRepository;
   private final RoomCodeGenerator roomCodeGenerator;
+  private final SimpMessagingTemplate messagingTemplate;
+  private final GameService gameService;
 
   private final SecureRandom random = new SecureRandom();
 
@@ -50,14 +58,35 @@ public class RoomService {
     return savedRoom;
   }
 
+
   @Transactional(readOnly = true)
-  public Room getRoom(String code) {
-    return roomRepository.findByCode(code).orElseThrow(() -> new CustomException(ErrorCode.ROOM_NOT_FOUND));
+  public RoomSnapshotResponse getRoom(String code) {
+    Room room = roomRepository.findByCode(code).orElseThrow(() -> new CustomException(ErrorCode.ROOM_NOT_FOUND));
+    return buildRoomSnapShotResponse(room);
   }
 
+  public RoomSnapshotResponse buildRoomSnapShotResponse(Room room) {
+    List<PlayerResponse> players = playerRepository.findPlayersByRoomCodeOrdered(room.getCode())
+        .stream()
+        .map(PlayerResponse::from).toList();
+
+    GameSession gameSession = gameSessionRepository.getOrCreate(room);
+
+    return new RoomSnapshotResponse(
+        room.getCode(),
+        room.getHostPlayerId(),
+        players,
+        room.getStatus().name(),
+        gameSession.getTotalRounds(),
+        gameSession.getCurrentRound()
+    );
+  }
+
+
+
   @Transactional
-  public JoinRoomResponse joinRoom(String roomCode, String nickname) {
-    Room room = getRoom(roomCode);
+  public RoomSnapshotResponse joinRoom(String roomCode, String nickname) {
+    Room room = roomRepository.findByCode(roomCode).orElseThrow(() -> new CustomException(ErrorCode.ROOM_NOT_FOUND));
     String normalizedNickname = normalizeNickname(nickname, PLAYER_FALLBACK_PREFIX);
     Player newPlayer = Player.builder()
         .nickname(normalizedNickname)
@@ -65,25 +94,15 @@ public class RoomService {
         .build();
 
     room.addPlayer(newPlayer);
-
     playerRepository.saveAndFlush(newPlayer);
 
-    List<PlayerResponse> players = playerRepository.findPlayersByRoomCodeOrdered(room.getCode())
-        .stream()
-        .map(PlayerResponse::from).toList();
-
-    return new JoinRoomResponse(
-        room.getCode(),
-        String.valueOf(newPlayer.getId()),
-        false,
-        players,
-        room.getStatus().name()
-    );
+    return buildRoomSnapShotResponse(room);
   }
+
 
   @Transactional
   public LeaveRoomResponse leaveRoom(String roomCode, String playerId) {
-    Room room = getRoom(roomCode);
+    Room room = roomRepository.findByCode(roomCode).orElseThrow(() -> new CustomException(ErrorCode.ROOM_NOT_FOUND));;
     Long playerIdAsLong = parsePlayerId(playerId);
     Player player = playerRepository.findById(playerIdAsLong)
         .filter(player1 -> player1.getRoom().getCode().equals(roomCode))
@@ -96,6 +115,7 @@ public class RoomService {
 
 
     if(remaining == 0){
+      gameService.endGame(room.getId());
       return new LeaveRoomResponse(
           roomCode,
           true,
@@ -152,6 +172,8 @@ public class RoomService {
     return fallbackPrefix + (1000 + random.nextInt(RANDOM_SUFFIX_RANGE));
   }
 
+
+
   private Long parsePlayerId(String rawPlayerId) {
     if (!StringUtils.hasText(rawPlayerId)) {
       throw new CustomException(ErrorCode.PLAYER_NOT_FOUND);
@@ -161,5 +183,14 @@ public class RoomService {
     } catch (NumberFormatException exception) {
       throw new CustomException(ErrorCode.PLAYER_NOT_FOUND);
     }
+  }
+
+  public void broadcastState(RoomSnapshotResponse roomSnapshotResponse) {
+    messagingTemplate.convertAndSend("/topic/rooms/" + roomSnapshotResponse.roomCode() + "/state",
+        roomSnapshotResponse);
+  }
+
+  public void broadcastGameEvent(String roomCode, GameEventMessage startEvent){
+    messagingTemplate.convertAndSend("/topic/rooms/" + roomCode + "/game", startEvent);
   }
 }
