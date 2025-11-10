@@ -5,8 +5,7 @@ import java.util.List;
 
 public record JoinRoomResponse(
     String roomCode,
-    String playerId,
-    boolean host,
+    String hostPlayerId,
     List<PlayerResponse> players,
     String status
 ) {

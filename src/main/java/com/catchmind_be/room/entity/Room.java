@@ -40,15 +40,13 @@ public class Room {
 
   @Enumerated(EnumType.STRING)
   @Column(nullable = false)
+  @Builder.Default
   private RoomStatus status = RoomStatus.WAITING;
 
   private String hostPlayerId;
 
   @Builder.Default
   private Integer maxPlayers = 5;
-
-  @Builder.Default
-  private Integer round = 3;
 
   @Builder.Default
   @OneToMany(mappedBy = "room", fetch = FetchType.LAZY,
@@ -68,6 +66,5 @@ public class Room {
   void onCreate() {
     if (createdAt == null) createdAt = Instant.now();
     if (maxPlayers == null) maxPlayers = 5;
-    if (round == null) round = 3;
   }
 }
