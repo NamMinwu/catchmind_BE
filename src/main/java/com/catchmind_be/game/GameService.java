@@ -5,6 +5,7 @@ import com.catchmind_be.game.response.GameState;
 import com.catchmind_be.game.response.GuessResult;
 import com.catchmind_be.player.PlayerRepository;
 import com.catchmind_be.room.response.RoomSnapshotResponse;
+import com.catchmind_be.websocket.response.DrawMessage;
 import java.util.Arrays;
 import java.util.Optional;
 import java.util.stream.Collectors;
@@ -189,6 +190,15 @@ public class GameService {
     playerRepository.save(player);
 
     return new GuessResult(true, gameSession);
+  }
+
+  @Transactional(readOnly = true)
+  public boolean canDraw(String roomCode, DrawMessage drawMessage) {
+    Room room = roomRepository.findByCode(roomCode)
+        .orElseThrow(() -> new CustomException(ErrorCode.ROOM_NOT_FOUND));
+    GameSession gameSession = gameSessionRepository.getOrCreate(room);
+    String drawerId = drawMessage.playerId();
+    return room.getStatus() == RoomStatus.PLAYING && drawerId.equals(gameSession.getCurrentDrawerId());
   }
 
   private boolean isDrawer(GameSession gameSession, String playerId) {

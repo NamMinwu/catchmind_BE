@@ -39,6 +39,9 @@ public class RoomMessageController {
 
   @MessageMapping("/rooms/{roomCode}/draw")
   public void drawMessage(@PathVariable String roomCode, DrawMessage message) {
+    if(!gameService.canDraw(roomCode, message)){
+      return;
+    }
     this.template.convertAndSend("/topic/rooms/" + roomCode + "/draw", message);
   }
 

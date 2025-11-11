@@ -36,13 +36,11 @@ public class RoomService {
   private final RoomCodeGenerator roomCodeGenerator;
   private final SimpMessagingTemplate messagingTemplate;
   private final GameService gameService;
-
   private final SecureRandom random = new SecureRandom();
 
   @Transactional
   public Room createRoom(String nickname) {
     String normalizedNickname = normalizeNickname(nickname, HOST_FALLBACK_PREFIX);
-
     Room room = Room.builder()
         .code(generateUniqueRoomCode())
         .build();
