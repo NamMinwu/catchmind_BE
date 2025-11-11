@@ -47,6 +47,21 @@ class RoomMessageControllerTest {
   }
 
   @Test
+  void 그림그리는플레이어는정답처리안됨() {
+    String roomCode = "ROOM2";
+    ChatMessage chatMessage = new ChatMessage("DRAWER", "drawer", "secret-word");
+    when(gameService.guessWord(roomCode, chatMessage.playerId(), chatMessage.message()))
+        .thenReturn(GuessResult.inCorrect());
+
+    controller.sendMessage(roomCode, chatMessage);
+
+    verify(template).convertAndSend("/topic/rooms/" + roomCode + "/chat", chatMessage);
+    verify(gameService).guessWord(roomCode, chatMessage.playerId(), chatMessage.message());
+    verify(roomService, never()).getRoom(any());
+    verify(roomService, never()).broadcastState(any());
+  }
+
+  @Test
   void 오답입력시_방상태브로드캐스트없음() {
     String roomCode = "ROOM2";
     ChatMessage chatMessage = new ChatMessage("2", "tester", "wrong");
@@ -85,4 +100,6 @@ class RoomMessageControllerTest {
     verify(roomService).getRoom(roomCode);
     verify(roomService).broadcastState(snapshotResponse);
   }
+
+
 }
