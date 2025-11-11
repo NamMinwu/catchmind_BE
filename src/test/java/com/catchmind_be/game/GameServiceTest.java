@@ -258,7 +258,7 @@ class GameServiceTest {
     gameService.executeRoundTimeout(room.getId());
 
     assertThat(session.getCurrentRound()).isEqualTo(2);
-    assertThat(session.getCurrentPlayerId()).isEqualTo(String.valueOf(p2.getId()));
+    assertThat(session.getCurrentDrawerId()).isEqualTo(String.valueOf(p2.getId()));
 
     ArgumentCaptor<String> destinationCaptor = ArgumentCaptor.forClass(String.class);
     ArgumentCaptor<Object> payloadCaptor = ArgumentCaptor.forClass(Object.class);
