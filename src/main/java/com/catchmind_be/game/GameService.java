@@ -1,9 +1,12 @@
 package com.catchmind_be.game;
 
+import com.catchmind_be.game.response.FinishedInfo;
 import com.catchmind_be.game.response.GameState;
+import com.catchmind_be.game.response.GuessResult;
 import com.catchmind_be.player.PlayerRepository;
 import com.catchmind_be.room.response.RoomSnapshotResponse;
 import java.util.Arrays;
+import java.util.Optional;
 import java.util.stream.Collectors;
 import com.catchmind_be.common.exception.CustomException;
 import com.catchmind_be.common.exception.code.ErrorCode;
@@ -28,6 +31,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 @AllArgsConstructor
 public class GameService {
 
+  private static final int SCORE_PER_SUCCESS = 100;
   private static final int DEFAULT_ROUND_DURATION_SECONDS = 60;
 
   private final RoomRepository roomRepository;
@@ -68,7 +72,6 @@ public class GameService {
     return GameState.toGameState(gameSession);
   }
 
-
   public GameSession getOrGreateGameSession(Long roomId) {
     Room room = roomRepository.findById(roomId)
         .orElseThrow(() -> new CustomException(ErrorCode.ROOM_NOT_FOUND));
@@ -90,48 +93,57 @@ public class GameService {
         gameScheduler.cancel(roomId);
         return;
       }
-      // 리펙 필요
       RoomSnapshotResponse roomSnapshotResponse = buildRoomSnapshotResponse(gameSession.getRoomCode());
-
       messagingTemplate.convertAndSend("/topic/rooms/" + roomSnapshotResponse.roomCode() + "/state",
           roomSnapshotResponse);
 
-      List<String> orderList = getOrderList(gameSession.getDrawerOrder());
-      int nextIndex = gameSession.getCurrentOrderIndex() + 1;
-      boolean gameFinished = isFinished(gameSession, nextIndex, orderList);
+      FinishedInfo finishedInfo = getFinishedInfo(gameSession);
 
-
-      GameEventMessage timeoutEvent = new GameEventMessage(
+      broadcastGameEvent(gameSession.getRoomCode(), new GameEventMessage(
           "ROUND_TIMEOUT",
           gameSession.getCurrentRound(),
           gameSession.getTotalRounds(),
-          gameSession.getCurrentPlayerId(),
+          gameSession.getCurrentDrawerId(),
           gameSession.getWord(),
-          gameFinished
-      );
+          finishedInfo.isFinished()
+      ));
 
-      messagingTemplate.convertAndSend("/topic/rooms/" + gameSession.getRoomCode() + "/game", timeoutEvent);
-
-      if(!gameFinished){
-        String newWord = wordGenerator.randomWord();
-        gameSession.nextRound(newWord, orderList.get(nextIndex));
-        GameEventMessage startEvent = new GameEventMessage(
-            "ROUND_STARTED",
-            gameSession.getCurrentRound(),
-            gameSession.getTotalRounds(),
-            gameSession.getCurrentPlayerId(),
-            newWord,
-            false
-        );
-        messagingTemplate.convertAndSend("/topic/rooms/" + gameSession.getRoomCode() + "/game", startEvent);
-        scheduleRoundTimeout(roomId, gameSession.getSecondsPerRound());
-        return;
+      if(!finishedInfo.isFinished()){
+        nextRound(gameSession, finishedInfo);
+        scheduleRoundTimeout(gameSession.getRoomId(), gameSession.getSecondsPerRound());
       }
 
       gameSession.markCompleted();
       cleanupAfterGame(roomId);
     });
   }
+
+
+  private void nextRound(GameSession gameSession, FinishedInfo finishedInfo) {
+    String newWord = wordGenerator.randomWord();
+    gameSession.nextRound(newWord, finishedInfo.orderList().get(finishedInfo.nextIndex()));
+    broadcastGameEvent(gameSession.getRoomCode(), new GameEventMessage(
+        "ROUND_STARTED",
+        gameSession.getCurrentRound(),
+        gameSession.getTotalRounds(),
+        gameSession.getCurrentDrawerId(),
+        newWord,
+        false
+    ));
+  }
+
+  public FinishedInfo getFinishedInfo(GameSession gameSession) {
+    List<String> orderList = getOrderList(gameSession.getDrawerOrder());
+    int nextIndex = gameSession.getCurrentOrderIndex() + 1;
+    boolean gameFinished = isFinished(gameSession, nextIndex, orderList);
+    return new FinishedInfo(
+        orderList,
+        nextIndex,
+        gameFinished
+    );
+  }
+
+
 
   @Transactional
   public void endGame(Long roomId) {
@@ -144,7 +156,46 @@ public class GameService {
     cleanupAfterGame(roomId);
   }
 
-  private boolean isFinished(GameSession gameSession, int nextIndex, List<String> orderList) {
+  public GuessResult guessWord(String roomCode, String playerId ,String word) {
+    Room room = roomRepository.findByCode(roomCode)
+        .orElseThrow(() -> new CustomException(ErrorCode.ROOM_NOT_FOUND));
+
+    if(word == null || word.isEmpty()) {
+      return GuessResult.inCorrect();
+    }
+
+    if(room.getStatus() == RoomStatus.WAITING) {
+      return GuessResult.inCorrect();
+    }
+
+    GameSession gameSession =gameSessionRepository.getOrCreate(room);
+
+    // 그리는 사람이면 안되게 해야해
+    if(isDrawer(gameSession, playerId)) {
+      return GuessResult.inCorrect();
+    }
+
+    String currentWord = gameSession.getWord();
+    String normalizedWord = word.trim();
+
+    if(!currentWord.equals(normalizedWord)) {
+      return GuessResult.inCorrect();
+    }
+
+    Player player = playerRepository.findById(Long.parseLong(playerId)).orElseThrow(
+        () -> new CustomException(ErrorCode.PLAYER_NOT_FOUND)
+    );
+    player.setScore(player.getScore() + SCORE_PER_SUCCESS);
+    playerRepository.save(player);
+
+    return new GuessResult(true, gameSession);
+  }
+
+  private boolean isDrawer(GameSession gameSession, String playerId) {
+    return gameSession.getCurrentDrawerId().equals(playerId);
+  }
+
+  public boolean isFinished(GameSession gameSession, int nextIndex, List<String> orderList) {
     return nextIndex >= orderList.size() || nextIndex >= gameSession.getTotalRounds();
   }
 
@@ -197,5 +248,9 @@ public class GameService {
         gameSession.getTotalRounds(),
         gameSession.getCurrentRound()
     );
+  }
+
+  public void broadcastGameEvent(String roomCode, GameEventMessage startEvent){
+    messagingTemplate.convertAndSend("/topic/rooms/" + roomCode + "/game", startEvent);
   }
 }

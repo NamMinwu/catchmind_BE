@@ -15,7 +15,7 @@ public record GameState(
         gameSession.getStatus(),
         gameSession.getTotalRounds(),
         gameSession.getCurrentRound(),
-        gameSession.getCurrentPlayerId(),
+        gameSession.getCurrentDrawerId(),
         gameSession.getWord()
     );
   }

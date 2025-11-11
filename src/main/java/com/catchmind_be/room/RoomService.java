@@ -113,7 +113,6 @@ public class RoomService {
 
     long remaining = playerRepository.countByRoom_Code(roomCode);
 
-
     if(remaining == 0){
       Long roomId = room.getId();
       gameService.endGame(roomId);
@@ -192,7 +191,5 @@ public class RoomService {
         roomSnapshotResponse);
   }
 
-  public void broadcastGameEvent(String roomCode, GameEventMessage startEvent){
-    messagingTemplate.convertAndSend("/topic/rooms/" + roomCode + "/game", startEvent);
-  }
+
 }

@@ -50,7 +50,7 @@ public class RoomController {
     GameState gameState = gameService.startGame(roomCode);
     RoomSnapshotResponse roomSnapshotResponse = roomService.getRoom(roomCode);
     roomService.broadcastState(roomSnapshotResponse);
-    roomService.broadcastGameEvent(roomCode, new GameEventMessage(
+    gameService.broadcastGameEvent(roomCode, new GameEventMessage(
         "ROUND_STARTED",
         gameState.currentRound(),
         gameState.totalRounds(),
