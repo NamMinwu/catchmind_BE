@@ -12,7 +12,7 @@ public class GameSession {
   private final int secondsPerRound;
   private int currentRound;
   private String drawerOrder;
-  private String currentPlayerId;
+  private String currentDrawerId;
   private String word;
   private int currentOrderIndex;
   private Instant roundStartedAt;
@@ -31,10 +31,10 @@ public class GameSession {
     return new GameSession(roomId, roomCode, totalRounds, secondsPerRound);
   }
 
-  public void start(String word, String currentPlayerId, String drawerOrder) {
+  public void start(String word, String currentDrawerId, String drawerOrder) {
     Instant now = Instant.now();
     this.drawerOrder = drawerOrder;
-    this.currentPlayerId = currentPlayerId;
+    this.currentDrawerId = currentDrawerId;
     this.word = word;
     this.currentOrderIndex = 0;
     this.currentRound = 1;
@@ -43,10 +43,10 @@ public class GameSession {
     this.roundEndsAt = now.plusSeconds(secondsPerRound);
   }
 
-  public void nextRound(String word, String currentPlayerId) {
+  public void nextRound(String word, String currentDrawerId) {
     Instant now = Instant.now();
     this.word = word;
-    this.currentPlayerId = currentPlayerId;
+    this.currentDrawerId = currentDrawerId;
     this.currentOrderIndex += 1;
     this.currentRound += 1;
     this.roundStartedAt = now;
